@@ -15,10 +15,8 @@ android {
 
 dependencies {
 
-    implementation fileTree(dir: 'libs', include: ['*.jar'])
     implementation project(':app')
     implementation "org.jetbrains.kotlin:kotlin-stdlib-jdk7:$kotlin_version"
-    implementation "org.jetbrains.kotlinx:kotlinx-coroutines-android:1.0.1"
 }
 
 repositories {

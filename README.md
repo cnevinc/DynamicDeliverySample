@@ -1,18 +1,78 @@
-ServiceLoader work un-expectedly in the feature module
+ServiceLoaders work un-expectedly in the feature module
 =====
-
-# Goal
-This project is to demo the problem to use the ServiceLoader in the featuer module.
-
-# Sympton
-app module has a dependency that uses ServiceLoader. But if we install the feature module and call the servcieLoader there, the app will crash and throw a FileNotFound exception. (On Android Vitals on Google Play it's ClassNotFoundException)
-
-For example, app module has a dependency that uses `kotlinx-coroutines-android library`, which will use ServiceLoader to load `MainDispatcherFactory`(which implmentation is `AndroidDispatcherFactory`), the app will crash if we don't call the Serviceloader before installing the feature mpdule. [source code](https://github.com/Kotlin/kotlinx.coroutines/blob/63b4673d65f2c7836a23d3bf5a6d1a8aeea862d9/core/kotlinx-coroutines-core/src/internal/MainDispatchers.kt#L15)
-
-The crash stack
+# App structure
+- app: base module
+- histort: feature module
+- myserviceloader: Service Loader Interface
+- depedency: history--(implmentation)-->app---(api)-->myserviceloader
+- diagram
 ```
-Unable to open zip file: /data/app/com.example.myapplication-A5NKQCQp_U8CmibwVYekXw==/base.apk
-java.io.FileNotFoundException: File doesn't exist: /data/app/com.example.myapplication-rFWlExb6yWYKdy1zvCu9Uw==/base.apk
+-------app--------------- MainActivity
+    |
+    |    
+    |--history----------- HistoryActivity
+    |
+    |
+    |--myserviceloader--- com.example.myserviceloader.IFactory                        (interface)
+                       |- com.example.myserviceloader.FactoryImplGecko                (implementaion1)
+                       |- com.example.myserviceloader.FactoryImplWebkit               (implementaion2)
+                       |- META-INF/services/com.example.myserviceloader.IFactory      (configuration)
+```
+# How to reproduce the issue
+## Happy path:
+- run below command to install base apk
+```
+rm -rf ./app/build/outputs/bundle/debug/ && \
+./gradlew bundleDebug && \
+bundletool build-apks --bundle=./app/build/outputs/bundle/debug/app.aab --output=./app/build/outputs/bundle/debug/app.apks && \
+mkdir ./app/build/outputs/bundle/debug/s && \
+bundletool extract-apks --apks=./app/build/outputs/bundle/debug/app.apks --output-dir=./app/build/outputs/bundle/debug/s --device-spec=./d.json --modules=history && \
+adb install -r ./app/build/outputs/bundle/debug/s/base-master.apk
+```
+- start the app, click "Load", see a toast "Gecko Implemenation"
+- click "Request Install", see a toast "install fail...."
+- install the feature module mannually
+```
+adb install-multiple --dont-kill -p com.example.myapplication ./app/build/outputs/bundle/debug/s/history-master.apk
+```
+- click "Request Install" again, a new activity popped up, you'll see `Gecko Implemetnation`
+
+
+## Problem path:
+- run below command to install base apk
+```
+rm -rf ./app/build/outputs/bundle/debug/ && \
+./gradlew bundleDebug && \
+bundletool build-apks --bundle=./app/build/outputs/bundle/debug/app.aab --output=./app/build/outputs/bundle/debug/app.apks && \
+mkdir ./app/build/outputs/bundle/debug/s && \
+bundletool extract-apks --apks=./app/build/outputs/bundle/debug/app.apks --output-dir=./app/build/outputs/bundle/debug/s --device-spec=./d.json --modules=history && \
+adb install -r ./app/build/outputs/bundle/debug/s/base-master.apk
+```
+- click "Request Install", see a toast "install fail...."
+- install the feature module mannually
+```
+adb install-multiple --dont-kill -p com.example.myapplication ./app/build/outputs/bundle/debug/s/history-master.apk
+```
+- click "Request Install" again, a new activity popped up, you'll see `No Implementation found....` means no implmenation's loaded by ServiceLoader.
+- press back, click "Load" button on MainActivity. You'll see a toast "can't find any implementation. Check the DexPathList?" 
+- After app restart, it'll work
+
+# Dive depper
+- If the ServiceLoader didn't find any implementaion, it'll only throw exception, the app won't crash. But some library (e.g. CoroutineContext, will throw an IllegalStateException: Module with the Main dispatcher is missing. Add dependency providing the Main dispatcher, e.g. 'kotlinx-coroutines-android') will want to crash the app.
+- Look at the ClassLoader the ServiceLoader used:
+```
+DexPathList[
+	[
+		zip file "/data/app/com.example.myapplication-PJFTWN7HgF29OEEyZUEqig==/base.apk", 
+		zip file "/data/app/com.example.myapplication-Oj-zgB0U9iIxRSItgdLwhQ==/split_history.apk"
+	],
+	nativeLibraryDirectories=[/data/app/com.example.myapplication-PJFTWN7HgF29OEEyZUEqig==/lib/x86, /system/lib]
+]
+```
+- And the crash trace
+```
+Unable to open zip file: /data/app/com.example.myapplication-PJFTWN7HgF29OEEyZUEqig==/base.apk
+java.io.FileNotFoundException: File doesn't exist: /data/app/com.example.myapplication-PJFTWN7HgF29OEEyZUEqig==/base.apk
         at java.util.zip.ZipFile.<init>(ZipFile.java:215)
         at java.util.zip.ZipFile.<init>(ZipFile.java:152)
         at java.util.jar.JarFile.<init>(JarFile.java:160)
@@ -26,58 +86,13 @@ java.io.FileNotFoundException: File doesn't exist: /data/app/com.example.myappli
         at java.util.ServiceLoader$LazyIterator.hasNextService(ServiceLoader.java:349)
         at java.util.ServiceLoader$LazyIterator.hasNext(ServiceLoader.java:402)
         at java.util.ServiceLoader$1.hasNext(ServiceLoader.java:488)
-        at kotlin.collections.CollectionsKt___CollectionsKt.toCollection(_Collections.kt:1132)
-        at kotlin.collections.CollectionsKt___CollectionsKt.toMutableList(_Collections.kt:1165)
-        at kotlin.collections.CollectionsKt___CollectionsKt.toList(_Collections.kt:1156)
-        at kotlinx.coroutines.MainDispatcherLoader.<clinit>(Dispatchers.kt:96)
-        at kotlinx.coroutines.Dispatchers.getMain(Dispatchers.kt:53)
-        at com.example.history.HistoryActivity.getCoroutineContext(HistoryActivity.kt:19)
+        at com.example.history.HistoryActivity.onCreate(HistoryActivity.kt:24)
 ```
-Some debugger information : the MainDispatcherFactory's classLoader:
-```
-dalvik.system.PathClassLoader[
-	DexPathList[
-		[
-			zip file "/data/app/com.example.myapplication-A5NKQCQp_U8CmibwVYekXw==/base.apk", 
-			zip file "/data/app/com.example.myapplication-DUm7FI9ZjDHMN-H_V4UgOQ==/split_history.apk"
-		],  nativeLibraryDirectories=[/system/lib]
-	]
-]
-```
+- And in rooted device, you will find `base.apk`, `lib` and `split_history.apk` are in `/data/app/com.example.myapplication-Oj-zgB0U9iIxRSItgdLwhQ==/` folder
+- I found when you first install the base.apk, the path was `PJFTWN7HgF29OEEyZUEqig`. After installing featude.apk, it changed to `Oj-zgB0U9iIxRSItgdLwhQ`. I think that's the reason ServiceLoader can't find `base.apk`
 
-Looks like it's looking for the base.apk, but the path for the base.apk has changed. (See STR #5 & #6)
-
-# STR
-
-1. make sure Line 50 in /app/build.gralde is enabled and run `./gradlew bundleDebug`
-2. `bundletool build-apks --bundle=./app/build/outputs/bundle/debug/app.aab  --output=./app/build/outputs/bundle/debug/app.apks`
-3. `mkdir ./app/build/outputs/bundle/debug/s`
-4. `bundletool extract-apks --apks=./app/build/outputs/bundle/debug/app.apks --output-dir=./app/build/outputs/bundle/debug/s --device-spec=./d.json --modules=history`
-5. `adb install -r ./app/build/outputs/bundle/debug/s/base-master.apk` # at this time, the file path for base apk is `/data/app/com.example.myapplication-A5NKQCQp_U8CmibwVYekXw==/base.apk`
-6. `adb install-multiple --dont-kill -p com.example.myapplication ./app/build/outputs/bundle/debug/s/history-master.apk` # at this time, the file path for base apk is `/data/app/com.example.myapplication-DUm7FI9ZjDHMN-H_V4UgOQ==/base.apk`, which is the same with `split_history.apk`
-
-note:
-if we change the name of the path in file system from `/data/app/com.example.myapplication-DUm7FI9ZjDHMN-H_V4UgOQ==/base.apk` to `/data/app/com.example.myapplication-A5NKQCQp_U8CmibwVYekXw==/base.apk` , the app won't crash 
-
-# Project structure
-```
------app--------MainActivity (depdends on library "org.mozilla.components:browser-domains:0.39.0")
- | 			  
- |---history----HistoryActivity implement CoroutineContext) (depends on "kotlinx-coroutines-android:1.0.1")
-```
-	
-
-# Work around
-My on-demand feature module depends on `kotlinx-coroutines-android:1.0.1`
-
-My library `org.mozilla.components:browser-domains:0.39.0` also depends on `kotlinx-coroutines-android:1.0.1`
-
-If I use ServiceLoader to load `MainDispatcherFactory`	's implementation in app module before I install the feature module, the app won't crash.
-
-See: https://github.com/cnevinc/DynamicDeliverySample/tree/workaround
-
-
-
+- the happy path will work because the class loader has the implementation before the feature module installed.
+- for the problem path to work, you can change the path to the original name `PJFTWN7HgF29OEEyZUEqig` after install the feature module before launching it, the ServiceLoader can work.
 
 
 

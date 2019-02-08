@@ -1,1 +1,1 @@
-include ':app', ':history'
+include ':app', ':history', ':myserviceloader'

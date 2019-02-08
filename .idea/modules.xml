@@ -5,6 +5,7 @@
       <module fileurl="file://$PROJECT_DIR$/DynamicDeliverySample.iml" filepath="$PROJECT_DIR$/DynamicDeliverySample.iml" />
       <module fileurl="file://$PROJECT_DIR$/app/app.iml" filepath="$PROJECT_DIR$/app/app.iml" />
       <module fileurl="file://$PROJECT_DIR$/history/history.iml" filepath="$PROJECT_DIR$/history/history.iml" />
+      <module fileurl="file://$PROJECT_DIR$/myserviceloader/myserviceloader.iml" filepath="$PROJECT_DIR$/myserviceloader/myserviceloader.iml" />
     </modules>
   </component>
 </project>
