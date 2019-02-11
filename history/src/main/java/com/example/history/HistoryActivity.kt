@@ -23,7 +23,7 @@ class HistoryActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
-        val serviceLoaders = ServiceLoader.load(IFactory::class.java, MainActivity::class.java.classLoader)
+        val serviceLoaders = ServiceLoader.load(IFactory::class.java, HistoryActivity::class.java.classLoader)
         var cakes = "No Implementation found, some library will crash if it can't find an implementation."
         for (serviceLoader in serviceLoaders) {
             cakes = serviceLoader.name()
